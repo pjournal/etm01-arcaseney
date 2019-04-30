@@ -1,0 +1,182 @@
+---
+title: "BOUN Spring 2019 ETM 58D Homework 2"
+author: "Adil Arca Seney & Begüm Urgenç"
+date: "April 29, 2019"
+output: html_document
+---
+#Task1
+
+```{r}
+
+library(data.table)
+library(plotly)
+library(ggplot2)
+library(ggfortify)
+library(scatterplot3d)
+
+matches=readRDS("C:\\Users\\a-adsene\\Desktop\\ETM58D\\df9b1196-e3cf-4cc7-9159-f236fe738215_matches.rds")
+
+odds=readRDS('C:\\Users\\a-adsene\\Desktop\\ETM58D\\df9b1196-e3cf-4cc7-9159-f236fe738215_odd_details.rds')
+
+matches$type=NULL
+matches$leagueId=NULL
+matches$home=NULL
+matches$away=NULL
+matches$date=NULL
+
+matches[,c('score_home','score_away') := tstrsplit(score,':')]
+matches[,score_home:=as.numeric(score_home)]
+matches[,score_away:=as.numeric(score_away)]
+matches[,c('total_score'):=score_home+score_away]
+matches= matches[complete.cases(matches)]
+matches= matches[score_home>score_away, Result:="Home"]
+matches= matches[score_home<score_away, Result:="Away"]
+matches= matches[score_home==score_away, Result:="Draw"]
+
+matches[,score_home:=NULL]
+matches[,score_away:=NULL]
+
+matches[,ou:=ifelse(total_score>=2.5,"over","under")]
+
+
+```
+
+Ordering depending on bookmakers
+
+```{r}
+
+setorder(odds,matchId,bookmaker,betType,oddtype,date)
+odds2 = odds[,.SD[.N],by=list(matchId,bookmaker,betType,oddtype)]
+odds3 = dcast(odds2,matchId~betType+oddtype+bookmaker, value.var = 'odd')
+
+odds4 = odds3[,lapply(.SD,function(x){sum(!is.na(x))})]
+```
+
+We have reached the maximum numbers of recurred odds to analyze wisely and selected first 70 ones
+
+```{r}
+columnstokeep = names(sort(unlist(odds4),decreasing = T)[1:70])
+
+odds5 = odds3[,columnstokeep,with=F]
+
+odds6 = odds5[complete.cases(odds5)]
+
+
+odds7=merge(odds6,matches[,c("matchId","ou")],by="matchId")
+odds7
+pcaodds = prcomp(odds7[,c(-1,-71)],scale. = T)
+summary(pcaodds)
+
+```
+The model can explain 59% with PC1 and can be increased to 90% by using the first three ones.
+
+#PCA2D
+
+```{r}
+autoplot(pcaodds,data=odds7,colour="ou")
+```
+
+2D plot of PCA is shown above and colours show if the game is ended over or under.
+Regarding the 2D plot, we can not classify bookmakers' odd data.
+Let's check on 3D data
+
+#PCA3D
+
+```{r}
+pcadt = as.data.table(pcaodds$x)
+pcadt
+
+p <- plot_ly(pcadt, x = ~PC1, y = ~PC2, z = ~PC3, color = ~odds7$ou, colors = c('#BF382A', '#0C4B8E')) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                     yaxis = list(title = 'PC2'),
+                     zaxis = list(title = 'PC3')))
+p
+
+
+```
+
+Regarding the 3D plot, we can not classify bookmakers' odd data again.
+
+#Manhattan
+
+```{r}
+#Distance matrix
+manhattan=dist(pcadt,"manhattan")
+manhattan[is.na(manhattan)]=0
+
+#Scaling
+manhattan=cmdscale(manhattan)
+manhattandt=as.data.table(manhattan)
+colnames(manhattandt)=c("C1","C2")
+
+m=plot_ly(manhattandt, x = ~C1, y = ~C2, color = ~odds7$ou, colors = c('#BF382A', '#0C4B8E')) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                     yaxis = list(title = 'PC2')))
+m
+```
+
+#Euclidean
+
+```{r}
+#Distance matrix
+eu=dist(pcadt)
+eu[is.na(eu)]=0
+
+#Scaling
+eu=cmdscale(eu)
+eudt=as.data.table(eu)
+colnames(eudt)=c("C1","C2")
+
+e=plot_ly(eudt, x = ~C1, y = ~C2, color = ~odds7$ou, colors = c('#BF382A', '#0C4B8E')) %>%
+  add_markers() %>%
+  layout(scene = list(xaxis = list(title = 'PC1'),
+                     yaxis = list(title = 'PC2')))
+e
+```
+
+Results of PCA and MDS are similar. We can not call a difference regarding all the graphs
+
+#Task2
+```{r}
+require(data.table)
+require(TunePareto)
+require(glmnet)
+
+testStart=as.Date('2018-11-16')
+trainStart=as.Date('2012-07-15')
+rem_miss_threshold=0.01 #parameter for removing bookmaker odds with missing ratio greater than this threshold
+
+source('C:\\Users\\a-adsene\\Desktop\\ETM58D\\data_preprocessing.r')
+source('C:\\Users\\a-adsene\\Desktop\\ETM58D\\feature_extraction.r')
+source('C:\\Users\\a-adsene\\Desktop\\ETM58D\\performance_metrics.r')
+source('C:\\Users\\a-adsene\\Desktop\\ETM58D\\train_models.r')
+
+
+# read data
+matches_raw=readRDS("C:\\Users\\a-adsene\\Desktop\\ETM58D\\df9b1196-e3cf-4cc7-9159-f236fe738215_matches.rds")
+odd_details_raw=readRDS('C:\\Users\\a-adsene\\Desktop\\ETM58D\\df9b1196-e3cf-4cc7-9159-f236fe738215_odd_details.rds')
+
+# preprocess matches
+matches=matches_data_preprocessing(matches_raw)
+
+# preprocess odd data
+odd_details=details_data_preprocessing(odd_details_raw,matches)
+
+# extract open and close odd type features from multiple bookmakers
+features=extract_features.openclose(matches,odd_details,pMissThreshold=rem_miss_threshold,trainStart,testStart)
+
+# divide data based on the provided dates 
+train_features=features[Match_Date>=trainStart & Match_Date<testStart] 
+test_features=features[Match_Date>=testStart] 
+```
+We changed alpha as 0 to eleminate the penalty
+```{r}
+# run glmnet on train data with tuning lambda parameter based on RPS and return predictions based on lambda with minimum RPS
+predictions=train_glmnet(train_features, test_features,not_included_feature_indices=c(1:5), alpha=0,nlambda=50, tune_lambda=TRUE,nofReplications=2,nFolds=10,trace=T)
+```
+Here are the results;
+```{r}
+predictions
+```
