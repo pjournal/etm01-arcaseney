@@ -1,0 +1,195 @@
+---
+title: "BOUN Spring 2019 ETM 58D Project"
+author: "Adil Arca Seney & Begüm Urgenç"
+output: html_document
+---
+##1.Intro
+
+Sports betting is a way of gambling that is all about placing a wager, also known as a bet, on the result of a sporting event. The primary aim of sports betting is to win additional money. Either you win money based on the bookmaker odds, or you lose your wager. Sports betting is really popular and it provides daily data which is a need for academic researchers working on data analysis. Also this data can be used for developing machine learning algorithms. In this project our aim is predicting match results depending on probabilities. Therefore our goal is minimizing the RPS.
+
+##2.Literature
+We are inspired by the report named [Statistical Football Modeling which is written by Jonas Mirza and Niklas Fejes](http://www.it.uu.se/edu/course/homepage/projektTDB/ht15/project16/Project16_Report.pdf) on January 2016, while we are developing an approach for our projects in this class.
+
+##3.Approach
+We have partitioned our data into seasons instead of years. Most recent data for a full season was season 2017-2018. Therefore we used this data as our test data. In order to train we used seasons before 2017-2018.
+First, we used random forest method we learned in class. Secondly, we used polr function from MASS package for building an ordered logistic regression model to take ordinal characteristic of the game results .
+
+##4.Results
+Our first RPS calculated with random forest method is 24.344 which is a little higher than expected. There we used another method and our second RPS calculated with polr function is 18.686.
+Therefore, our second RPS is better than the RPS we have calculated with random forest method in the first place.
+
+##5.Conclusions and Future Work
+To conclude, it was hard to get meaningful features for forecasting 1x2 bets. Although we got better results with our second approach, we can say that there is plenty room of improvement that can be suggested as future works such as filtering the most succesfull bookmakers' odds in order to eliminate bookmakers with bad quality data, eliminating N/A's on each data set in first steps, using alternative approaches like  gbm and glmnet in order to train our data.
+
+##6.Codes
+
+```{r}
+
+require(data.table)
+require(lubridate)
+require(randomForest)
+require(MASS)
+
+source('C:\\Users\\a-adsene\\Desktop\\ETM58D\\train_models.r')
+
+matches=readRDS("C:\\Users\\a-adsene\\Desktop\\ETM58D\\df9b1196-e3cf-4cc7-9159-f236fe738215_matches.rds")
+
+odds=readRDS('C:\\Users\\a-adsene\\Desktop\\ETM58D\\df9b1196-e3cf-4cc7-9159-f236fe738215_odd_details.rds')
+
+matches$type=NULL
+matches$leagueId=NULL
+
+#update time format
+matches[,timestamp:=as_datetime(date,tz='Turkey')]
+matches[,date:=NULL]
+
+odds[,timestamp:=as_datetime(date,tz='Turkey')]
+odds[,date:=NULL]
+
+#check naming errors to standartize
+sort(unique(matches$home))
+sort(unique(matches$away))
+
+# fix data error
+matches[home=='crystal-palace',home:='crystal palace']
+matches[home=='manchester-city',home:='manchester city']
+matches[home=='manchester-utd',home:='manchester united']
+matches[home=='manchester-united',home:='manchester united']
+matches[home=='newcastle utd',home:='newcastle']
+matches[home=='stoke',home:='stoke city']
+matches[home=='west-ham',home:='west ham']
+matches[away=='crystal-palace',away:='crystal palace']
+matches[away=='manchester-city',away:='manchester city']
+matches[away=='manchester-utd',away:='manchester united']
+matches[away=='manchester-united',away:='manchester united']
+matches[away=='newcastle utd',away:='newcastle']
+matches[away=='stoke',away:='stoke city']
+matches[away=='west-ham',away:='west ham']
+
+matches[,c('score_home','score_away') := tstrsplit(score,':')]
+matches[,score_home:=as.numeric(score_home)]
+matches[,score_away:=as.numeric(score_away)]
+matches= matches[complete.cases(matches)]
+matches= matches[score_home>score_away, Result:="Home"]
+matches= matches[score_home<score_away, Result:="Away"]
+matches= matches[score_home==score_away, Result:="Draw"]
+
+
+# define seasons
+matches[
+  ,season:=ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2010)) |((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2011)),"2010-2011"
+                  ,ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2011)) | ((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2012)),"2011-2012"
+                          ,ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2012)) | ((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2013)),"2012-2013"
+                                  ,ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2013)) | ((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2014)),"2013-2014"
+                                          ,ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2014)) | ((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2015)),"2014-2015"
+                                                  ,ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2015)) | ((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2016)),"2015-2016"
+                                                          ,ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2016)) | ((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2017)),"2016-2017"
+                                                                  ,ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2017)) | ((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2018)),"2017-2018"
+                                                                          ,ifelse(((month(matches$timestamp,label=FALSE)>=7)&(year(matches$timestamp)==2018)) | ((month(matches$timestamp,label=FALSE)<=6)&(year(matches$timestamp)==2019)),"2018-2019","NA")))))))))
+  ]
+
+
+filtered_odd=odds[betType=='1x2']
+filtered_odd[,totalhandicap:=NULL]
+filtered_odd[,betType:=NULL]
+filtered_odd=filtered_odd[order(matchId,bookmaker,oddtype,timestamp)]
+latest_odds=filtered_odd[,list(close_odd=odd[.N]),list(matchId,bookmaker,oddtype)]
+
+# convert Latest Odds to wide table
+wLatest_odds=dcast(latest_odds,matchId + bookmaker~oddtype,value.var='close_odd')
+
+# add normalized probabilities for Latest odds
+wLatest_odds[,home_prob:=(1/odd1)/((1/odd1)+(1/oddX)+(1/odd2))]
+wLatest_odds[,draw_prob:=(1/oddX)/((1/odd1)+(1/oddX)+(1/odd2))]
+wLatest_odds[,away_prob:=(1/odd2)/((1/odd1)+(1/oddX)+(1/odd2))]
+
+Lodds_with_results=merge(matches,wLatest_odds,by=c('matchId'),all.x=TRUE)
+
+test=Lodds_with_results[season=="2017-2018"]
+train=Lodds_with_results[season!="2018-2019" & season!="2017-2018"]
+train$timestamp=NULL
+train$matchId=NULL
+
+train$Result=as.factor(train$Result)
+rf=randomForest(Result~.,data=train[,c("Result","home_prob","draw_prob","away_prob")],na.action=na.roughfix)
+p=predict(rf,newdata=test)
+table(test$Result,p)
+
+RPS_single<- function(probs,outcomes){
+  probs = cumsum(probs)
+  outcomes = cumsum(outcomes)
+  RPS = sum((probs-outcomes )^2) / (length(probs)-1)
+  return(RPS)
+}
+
+RPS_matrix<- function(probs,outcomes){
+  probs=as.matrix(probs)
+  outcomes=as.matrix(outcomes)
+  probs=t(apply(t(probs), 2, cumsum))
+  outcomes=t(apply(t(outcomes), 2, cumsum))
+  RPS = apply((probs-outcomes)^2,1,sum) / (ncol(probs)-1)
+  return(RPS)
+}
+
+pp=predict(rf,newdata=test,type="prob")
+
+outcomes=matrix(0,nrow=nrow(pp),ncol=3)
+for(e in 1:nrow(pp)){
+  if(test$Result[e]=='Away'){
+    outcomes[e,1]=1
+  }else if(test$Result[e]=='Draw'){
+    outcomes[e,2]=1
+  }else{
+    outcomes[e,3]=1
+  }
+}
+
+RPS=RPS_matrix(pp,outcomes)
+RPS=RPS[!is.na(RPS)]
+mean(RPS)
+
+Ordinal_test = test
+Ordinal_train = train
+
+Ordinal_train = Ordinal_train[,home_prob:=ifelse(home_prob<0.2,"vl",
+                                           ifelse(home_prob<0.4,"l",
+                                                  ifelse(home_prob<0.6,"m",
+                                                         ifelse(home_prob<0.8,"h","vh"))))]
+
+Ordinal_train = Ordinal_train[,draw_prob:=ifelse(draw_prob<0.2,"vl",
+                                            ifelse(draw_prob<0.4,"l",
+                                                   ifelse(draw_prob<0.6,"m",
+                                                          ifelse(draw_prob<0.8,"h","vh"))))]
+
+Ordinal_train = Ordinal_train[,away_prob:=ifelse(away_prob<0.2,"vl",
+                                           ifelse(away_prob<0.4,"l",
+                                                  ifelse(away_prob<0.6,"m",
+                                                         ifelse(away_prob<0.8,"h","vh"))))]
+
+Ordinal_test = Ordinal_test[,home_prob:=ifelse(home_prob<0.2,"vl",
+                                                 ifelse(home_prob<0.4,"l",
+                                                        ifelse(home_prob<0.6,"m",
+                                                               ifelse(home_prob<0.8,"h","vh"))))]
+
+Ordinal_test = Ordinal_test[,draw_prob:=ifelse(draw_prob<0.2,"vl",
+                                                 ifelse(draw_prob<0.4,"l",
+                                                        ifelse(draw_prob<0.6,"m",
+                                                               ifelse(draw_prob<0.8,"h","vh"))))]
+
+Ordinal_test = Ordinal_test[,away_prob:=ifelse(away_prob<0.2,"vl",
+                                                 ifelse(away_prob<0.4,"l",
+                                                        ifelse(away_prob<0.6,"m",
+                                                               ifelse(away_prob<0.8,"h","vh"))))]
+
+pMod <- polr(Result ~ home_prob + draw_prob + away_prob, data=Ordinal_train)
+
+po=predict(pMod,Ordinal_test)
+table(Ordinal_test$Result,po)
+
+pop=predict(pMod,Ordinal_test,type="prob")
+RPSo=RPS_matrix(pop,outcomes)
+RPSo=RPSo[!is.na(RPSo)]
+mean(RPSo)
+
+```
+
